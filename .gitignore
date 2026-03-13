@@ -1,0 +1,36 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# IDE
+**/.vscode/
+**/.devcontainer/
+**/.idea/
+*.swp
+*.swo
+*~
+
+# MuJoCo
+**/MUJOCO_LOG.TXT
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+.eggs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# RL training artifacts (keep models in models/ if needed)
+wandb/
+runs/
+checkpoints/
+*.onnx
+*.pt
+!models/**/*.onnx
+!models/**/*.pt

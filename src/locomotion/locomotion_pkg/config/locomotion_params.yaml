@@ -1,0 +1,25 @@
+locomotion_node:
+  ros__parameters:
+    mode: "standing"  # "standing", "sinusoidal", "rl"
+    control_rate: 50.0  # Hz
+
+    # Standing pose PD gains (used in standing mode)
+    kp: 100.0
+    kd: 10.0
+
+    # Sinusoidal gait parameters
+    gait_frequency: 1.0  # Hz
+    hip_amplitude: 0.3   # radians
+    knee_amplitude: 0.4
+    ankle_amplitude: 0.15
+
+    # RL policy parameters
+    policy_path: ""  # path to trained .pt or .onnx model
+    observation_dim: 48
+    action_dim: 23
+
+gait_scheduler_node:
+  ros__parameters:
+    min_gait_frequency: 0.5  # Hz
+    max_gait_frequency: 2.0
+    deadband_velocity: 0.01  # m/s — below this, robot stands

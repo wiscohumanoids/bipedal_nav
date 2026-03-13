@@ -1,0 +1,20 @@
+# Navigate.action
+# End-to-end navigation action: SLAM plans path, state estimation tracks,
+# locomotion executes walking.
+
+# === Goal ===
+geometry_msgs/PoseStamped target_pose
+float64 desired_speed
+float64 distance_tolerance  # how close is "arrived" (meters)
+---
+# === Result ===
+bool success
+string message
+geometry_msgs/PoseStamped final_pose
+float64 distance_error
+---
+# === Feedback ===
+geometry_msgs/PoseStamped current_pose
+float64 distance_remaining
+float64 estimated_time_remaining
+string current_phase  # "planning", "walking", "adjusting", "arrived"

@@ -1,0 +1,23 @@
+state_estimator_node:
+  ros__parameters:
+    update_rate: 100.0  # Hz (match controller rate)
+
+    # EKF noise parameters
+    imu_accel_noise: 0.01
+    imu_gyro_noise: 0.001
+    imu_accel_bias_noise: 0.0001
+    imu_gyro_bias_noise: 0.00001
+
+    # Process noise
+    position_process_noise: 0.001
+    velocity_process_noise: 0.01
+    orientation_process_noise: 0.001
+
+    # SLAM measurement noise (when available)
+    slam_position_noise: 0.05
+    slam_orientation_noise: 0.02
+
+contact_estimator_node:
+  ros__parameters:
+    contact_threshold: 10.0  # Newtons
+    update_rate: 100.0  # Hz
