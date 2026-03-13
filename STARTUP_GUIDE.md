@@ -118,8 +118,8 @@ MuJoCo ("Multi-Joint dynamics with Contact") is a physics engine optimized for r
 ```bash
 # Clone the repository
 cd ~
-git clone <YOUR_GITHUB_URL> humanoid_ws
-cd humanoid_ws
+git clone <YOUR_GITHUB_URL> bipedal_nav
+cd bipedal_nav
 
 # Install all ROS2 dependencies
 sudo apt install -y \
@@ -137,12 +137,16 @@ sudo apt install -y \
 # OR use the automated setup script:
 # ./scripts/setup_environment.sh
 
+# Conda users: install ROS2 build deps in your conda env BEFORE building
+# (empy must be 3.x — version 4.x is incompatible with ROS2 Humble)
+# pip install catkin_pkg 'empy<4' lark
+
 # Build the workspace
 colcon build --symlink-install
 source install/setup.bash
 
 # Add workspace to .bashrc so it's sourced automatically
-echo "source ~/humanoid_ws/install/setup.bash" >> ~/.bashrc
+echo "source ~/bipedal_nav/install/setup.bash" >> ~/.bashrc
 ```
 
 **Verify the build:**
@@ -176,7 +180,7 @@ You should see:
 
 ### Interact with the Simulation
 
-Open new terminals (each needs `source ~/humanoid_ws/install/setup.bash`):
+Open new terminals (each needs `source ~/bipedal_nav/install/setup.bash`):
 
 ```bash
 # Terminal 2: See all active topics
@@ -324,7 +328,7 @@ Your code publishes JointTrajectory
 | State estimation code | `src/state_estimation/state_estimation_pkg/` | Python |
 | Locomotion code | `src/locomotion/locomotion_pkg/locomotion_pkg/` | Python |
 | Integration launch | `src/integration/launch/full_stack.launch.py` | Python |
-| Motion primitives | `src/integration/motion_primitives_pkg/` | Python |
+| Motion primitives | `src/motion_primitives_pkg/` | Python |
 
 ### The G1 Robot
 
@@ -433,7 +437,7 @@ ros2 topic echo /clock
 
 ```bash
 # Make sure you've sourced the workspace
-source ~/humanoid_ws/install/setup.bash
+source ~/bipedal_nav/install/setup.bash
 
 # Rebuild
 colcon build --symlink-install

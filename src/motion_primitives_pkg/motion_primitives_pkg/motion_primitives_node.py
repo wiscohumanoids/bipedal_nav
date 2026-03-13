@@ -71,19 +71,19 @@ R_SHOULDER_PITCH = 18
 R_SHOULDER_ROLL = 19
 R_ELBOW = 21
 
-# Stable standing pose (radians)
+# Stable standing pose — matches the MJCF "stand" keyframe.
 STANDING_POSE = [
-    -0.1,   # left_hip_pitch
+    -0.2,   # left_hip_pitch
      0.0,   # left_hip_roll
      0.0,   # left_hip_yaw
-     0.25,  # left_knee
-    -0.15,  # left_ankle_pitch
+     0.4,   # left_knee
+    -0.2,   # left_ankle_pitch
      0.0,   # left_ankle_roll
-    -0.1,   # right_hip_pitch
+    -0.2,   # right_hip_pitch
      0.0,   # right_hip_roll
      0.0,   # right_hip_yaw
-     0.25,  # right_knee
-    -0.15,  # right_ankle_pitch
+     0.4,   # right_knee
+    -0.2,   # right_ankle_pitch
      0.0,   # right_ankle_roll
      0.0,   # waist_yaw
      0.3,   # left_shoulder_pitch
@@ -162,68 +162,74 @@ class MotionPrimitivesNode(Node):
         return list(STANDING_POSE)
 
     def _squat(self):
-        """Bend knees then return to standing (period ~3 s)."""
+        """Bend knees then return to standing (period ~4 s)."""
         pos = list(STANDING_POSE)
-        phase = 0.5 * (1.0 - math.cos(2.0 * math.pi * self.t / 3.0))  # 0→1→0
+        phase = 0.5 * (1.0 - math.cos(2.0 * math.pi * self.t / 4.0))  # 0→1→0
 
-        squat_depth = 0.5  # additional knee bend (rad)
-        hip_comp = 0.25    # hip pitch compensation
+        squat_depth = 0.3   # additional knee bend (rad)
+        # Hip must pitch forward MORE than ankle to keep CoM over feet,
+        # because the knee link has a backward x-offset (-0.078m).
+        hip_comp = squat_depth * 0.8
+        ankle_comp = squat_depth * 0.2
 
         pos[L_HIP_PITCH] -= hip_comp * phase
         pos[R_HIP_PITCH] -= hip_comp * phase
         pos[L_KNEE] += squat_depth * phase
         pos[R_KNEE] += squat_depth * phase
-        pos[L_ANKLE_PITCH] -= (squat_depth - hip_comp) * 0.5 * phase
-        pos[R_ANKLE_PITCH] -= (squat_depth - hip_comp) * 0.5 * phase
+        pos[L_ANKLE_PITCH] -= ankle_comp * phase
+        pos[R_ANKLE_PITCH] -= ankle_comp * phase
         return pos
 
     def _shift_weight(self):
-        """Sway hips left/right (period ~4 s)."""
+        """Sway hips left/right (period ~5 s)."""
         pos = list(STANDING_POSE)
-        phase = math.sin(2.0 * math.pi * self.t / 4.0)
+        phase = math.sin(2.0 * math.pi * self.t / 5.0)
 
-        roll_amp = 0.08
+        # Keep roll small — ankle roll range is only ±0.26 rad
+        roll_amp = 0.04
         pos[L_HIP_ROLL] += roll_amp * phase
         pos[R_HIP_ROLL] += roll_amp * phase
-        pos[L_ANKLE_ROLL] -= roll_amp * 0.5 * phase
-        pos[R_ANKLE_ROLL] -= roll_amp * 0.5 * phase
-
-        # slight waist compensation
-        pos[WAIST_YAW] = 0.05 * phase
+        pos[L_ANKLE_ROLL] -= roll_amp * phase
+        pos[R_ANKLE_ROLL] -= roll_amp * phase
         return pos
 
     def _step_forward(self):
-        """Small step motion cycling at ~4 s period."""
+        """Visible stepping-in-place motion cycling at ~5 s period."""
         pos = list(STANDING_POSE)
-        period = 4.0
+        period = 5.0
         t_mod = self.t % period
         half = period / 2.0
 
+        step_len = 0.15   # hip pitch forward swing
+        lift = 0.25       # knee lift
+        roll_shift = 0.06 # weight shift via hip roll
+
         if t_mod < half:
-            # Left leg swings forward
+            # Shift weight right, swing left leg forward
             phase = 0.5 * (1.0 - math.cos(2.0 * math.pi * t_mod / half))
-            step_len = 0.2
-            lift = 0.3
 
             pos[L_HIP_PITCH] -= step_len * phase
             pos[L_KNEE] += lift * phase
-            pos[L_ANKLE_PITCH] -= 0.1 * phase
+            pos[L_ANKLE_PITCH] -= step_len * 0.5 * phase
 
-            # shift weight onto right leg
-            pos[L_HIP_ROLL] += 0.05 * phase
-            pos[R_HIP_ROLL] += 0.05 * phase
+            # lean onto right foot
+            pos[L_HIP_ROLL] += roll_shift * phase
+            pos[R_HIP_ROLL] += roll_shift * phase
+            pos[L_ANKLE_ROLL] -= roll_shift * phase
+            pos[R_ANKLE_ROLL] -= roll_shift * phase
         else:
-            # Right leg swings forward
+            # Shift weight left, swing right leg forward
             phase = 0.5 * (1.0 - math.cos(2.0 * math.pi * (t_mod - half) / half))
-            step_len = 0.2
-            lift = 0.3
 
             pos[R_HIP_PITCH] -= step_len * phase
             pos[R_KNEE] += lift * phase
-            pos[R_ANKLE_PITCH] -= 0.1 * phase
+            pos[R_ANKLE_PITCH] -= step_len * 0.5 * phase
 
-            pos[L_HIP_ROLL] -= 0.05 * phase
-            pos[R_HIP_ROLL] -= 0.05 * phase
+            # lean onto left foot
+            pos[L_HIP_ROLL] -= roll_shift * phase
+            pos[R_HIP_ROLL] -= roll_shift * phase
+            pos[L_ANKLE_ROLL] += roll_shift * phase
+            pos[R_ANKLE_ROLL] += roll_shift * phase
         return pos
 
     def _arm_swing(self):
