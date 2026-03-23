@@ -17,8 +17,15 @@ humanoid_ws/
 ├── ARCHITECTURE.md            ← You are here
 ├── STARTUP_GUIDE.md           ← Setup instructions
 ├── .gitignore
+├── Dockerfile                 ← Main project Docker image (MuJoCo + ROS2 + all packages)
+├── docker/
+│   ├── build.sh               ← Build main Docker image
+│   ├── run.sh                 ← Run/exec into main container
+│   ├── Dockerfile.orbslam3    ← ORB-SLAM3 Docker image (separate container)
+│   ├── run_orbslam3.sh        ← Run/exec into ORB-SLAM3 container
+│   └── orbslam3_config/       ← G1 camera config + launch files for ORB-SLAM3
 ├── scripts/
-│   ├── setup_environment.sh   ← One-time dependency install
+│   ├── setup_environment.sh   ← One-time dependency install (native only)
 │   ├── build.sh               ← Build workspace (all or per-team)
 │   └── verify_setup.sh        ← Check everything is installed
 │
@@ -61,8 +68,8 @@ Each team's package communicates **only through ROS2 topics** defined in `humano
 │                                                                     │
 │  Publishes:                                                         │
 │    /joint_states          (sensor_msgs/JointState)                  │
-│    /camera/color/image_raw (sensor_msgs/Image)                     │
-│    /camera/depth/image_raw (sensor_msgs/Image)                     │
+│    /head_camera/color      (sensor_msgs/Image)                     │
+│    /head_camera/depth      (sensor_msgs/Image)                     │
 │    /imu/data              (sensor_msgs/Imu)                        │
 │    /contact/left_foot     (contact force)                          │
 │    /contact/right_foot    (contact force)                          │
@@ -153,9 +160,10 @@ These are the **contracts** between teams. Changing them requires coordination.
 ### mujoco_ros2_control
 - **MuJoCo ↔ ROS2 bridge**: Runs the physics sim and exposes joints via `ros2_control`
 - **MujocoSystem plugin**: Hardware interface that reads joint states from MuJoCo and writes commands back
-- **Camera support**: Can render camera images and publish them as ROS2 Image messages
+- **Camera support**: Renders camera images via OpenGL and publishes as ROS2 Image messages (~6 Hz)
 - **Sensor support**: IMU and force/torque sensors
 - **Control modes**: Position, velocity, and effort (torque) control with optional PID
+- **Headless mode**: Supports `headless:=true` launch argument for running inside Docker without a display (uses OSMesa software rendering)
 
 ### unitree_ros2_control
 - **Launch file**: Starts MuJoCo sim + robot state publisher + controllers
@@ -185,8 +193,9 @@ A camera is mounted on the torso body in the MJCF model (`g1_23dof_rev_1_0.xml`)
 
 | Topic | Type | Rate | Used by |
 |-------|------|------|---------|
-| `/camera/color/image_raw` | `sensor_msgs/Image` | ~30 Hz | SLAM (visual odometry, mapping) |
-| `/camera/depth/image_raw` | `sensor_msgs/Image` | ~30 Hz | SLAM (depth-based obstacle detection, occupancy grid) |
+| `/head_camera/color` | `sensor_msgs/Image` | ~6 Hz | SLAM (visual odometry, mapping) |
+| `/head_camera/depth` | `sensor_msgs/Image` | ~6 Hz | SLAM (depth-based obstacle detection, occupancy grid) |
+| `/head_camera/camera_info` | `sensor_msgs/CameraInfo` | ~6 Hz | SLAM (camera intrinsics) |
 
 ### IMU
 
@@ -206,6 +215,49 @@ Touch sensors on both feet detect ground contact forces.
 |-------|------|------|---------|
 | `/contact/left_foot` | Contact force | 100 Hz | State Estimation + Locomotion (gait phase, stance/swing detection) |
 | `/contact/right_foot` | Contact force | 100 Hz | State Estimation + Locomotion (gait phase, stance/swing detection) |
+
+---
+
+## Docker Architecture
+
+The entire stack runs inside Docker containers — no native installs needed. Works on Linux, macOS, and Windows.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Host Machine (any OS)                      │
+│                                                             │
+│  ┌─────────────────────────────┐  ┌───────────────────────┐ │
+│  │  humanoid_ws container      │  │  orbslam3 container   │ │
+│  │  (./docker/run.sh)          │  │  (./docker/run_       │ │
+│  │                             │  │   orbslam3.sh)        │ │
+│  │  MuJoCo sim (headless)      │  │                       │ │
+│  │  ros2_control bridge        │  │  ORB-SLAM3 C++ lib    │ │
+│  │  Robot state publisher      │  │  ROS2 wrapper         │ │
+│  │  SLAM/StateEst/Loco nodes   │  │                       │ │
+│  │                             │  │  Subscribes:          │ │
+│  │  Publishes:                 │  │  /head_camera/color   │ │
+│  │  /joint_states              │  │  /head_camera/depth   │ │
+│  │  /head_camera/color,depth   │──│                       │ │
+│  │  /imu/data                  │  │  Publishes:           │ │
+│  │  /contact/*                 │  │  /robot_pose_slam     │ │
+│  │                             │  │  /map_points          │ │
+│  └─────────────────────────────┘  │  TF: map→odom        │ │
+│           ▲                       └───────────────────────┘ │
+│           │  All containers share --network host            │
+│           │  ROS2 DDS topics flow freely between them       │
+│           ▼                                                 │
+│  ┌─────────────────────────────┐                            │
+│  │  Additional containers      │                            │
+│  │  (team-specific tools,      │                            │
+│  │   visualization, etc.)      │                            │
+│  └─────────────────────────────┘                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Key points:
+- **`--network host`** makes all containers share the host's network — ROS2 topics flow between containers automatically
+- **Headless mode** (`headless:=true`) uses OSMesa software rendering — no display server or GPU needed
+- The `run.sh` scripts auto-detect running containers and `docker exec` into them instead of starting duplicates
 
 ---
 
@@ -255,32 +307,39 @@ This means:
 
 **Your job:** Take camera images from the simulated robot, build a map, localize the robot, and plan paths.
 
-**Where your code lives:** `src/slam/slam_pkg/`
+**Where your code lives:** `src/slam/slam_pkg/` (your Python nodes) + `docker/orbslam3_config/` (ORB-SLAM3 config)
 
-**Phase 1 — Get camera working (Week 1-2)**
-- Add a camera to the G1's head in the MJCF file (`g1_23dof_rev_1_0.xml`)
-- The `mujoco_ros2_control` system already supports cameras — you need to add a `<camera>` element to the MJCF and configure it in the URDF
-- Verify camera images appear on `/camera/color/image_raw`
-- Write a simple node that subscribes and displays the images with OpenCV
+**What's already set up:**
+- Head camera is configured in `g1_23dof_rev_1_0.xml` (640x480, fovy=90°, ~6 Hz)
+- Camera topics: `/head_camera/color`, `/head_camera/depth`, `/head_camera/camera_info`
+- ORB-SLAM3 is Dockerized and configured for the G1 camera (see Section 4 of STARTUP_GUIDE.md)
+- A proof-of-concept depth-based SLAM node exists in `slam_pkg/slam_node.py`
 
-**Phase 2 — Visual odometry (Week 2-4)**
-- Implement or integrate a visual odometry pipeline (ORB features, optical flow, etc.)
-- Publish odometry as `geometry_msgs/PoseStamped` or custom `SlamState`
-- Options: ORB-SLAM3, rtabmap, or your own feature-based VO
+**Phase 1 — ORB-SLAM3 integration (Week 1-2)**
+- Run ORB-SLAM3 via `docker/run_orbslam3.sh` (already configured)
+- Verify pose output on `/robot_pose_slam` and point cloud on `/map_points`
+- Write Python nodes in `slam_pkg` that subscribe to ORB-SLAM3's ROS2 outputs
+- ORB-SLAM3 runs in C++ inside Docker; your team writes Python code consuming its output topics
 
-**Phase 3 — Mapping + path planning (Week 4-6)**
-- Build an occupancy grid from depth images
-- Implement A* or RRT path planning
+**Phase 2 — Dense mapping + terrain reconstruction (Week 2-4)**
+- Combine ORB-SLAM3 pose with depth images to build dense occupancy grids or 3D voxel maps
+- Convert the map into MuJoCo MJCF format (heightfields or meshes) for terrain reconstruction
+- Publish occupancy grid on `/slam/map`
+
+**Phase 3 — Path planning (Week 4-6)**
+- Implement A* or RRT path planning on the occupancy grid
 - Publish `/cmd_vel` (desired robot velocity) for the locomotion team
 
 **Phase 4 — Integration (Week 6-8)**
 - Connect to state estimation for corrected pose
 - Test full SLAM → navigation pipeline
+- Ensure `map -> odom -> base_link` TF chain works with state estimation team
 
 **Key files to study:**
 - `mujoco_ros2_control/src/mujoco_cameras.cpp` — how cameras work in the sim
-- `mujoco_ros2_control_demos/launch/camera_example.launch.py` — camera demo
-- `g1_description/g1_23dof_rev_1_0.xml` — MJCF model (add camera here)
+- `docker/orbslam3_config/g1_rgbd.yaml` — ORB-SLAM3 camera intrinsics for G1
+- `docker/orbslam3_config/g1-rgbd-ros-params.yaml` — ORB-SLAM3 ROS2 topic mapping
+- `g1_description/g1_23dof_rev_1_0.xml` — MJCF model with head_camera
 
 ---
 
@@ -296,8 +355,8 @@ This means:
 - No filtering, no fusion — just data forwarding
 
 **Phase 2 — IMU integration (Week 2-4)**
-- Add an IMU sensor to the MJCF model (add `<sensor>` elements for framequat, gyro, accelerometer)
-- The MuJoCo system already reads IMU sensors — see `mujoco_system.cpp:register_sensors()`
+- IMU sensor is already configured in the MJCF model (framequat, gyro, accelerometer on pelvis)
+- The MuJoCo system already reads and publishes IMU data on `/imu/data` — see `mujoco_system.cpp:register_sensors()`
 - Implement IMU integration (dead reckoning) for base orientation and velocity
 
 **Phase 3 — EKF fusion (Week 4-6)**
@@ -454,8 +513,9 @@ git push -u origin slam/add-orb-features
 | `/joint_states` | JointState | joint_state_broadcaster | 100 Hz |
 | `/clock` | Clock | mujoco_ros2_control | sim rate |
 | `/tf` | TFMessage | robot_state_publisher | 100 Hz |
-| `/camera/color/image_raw` | Image | mujoco_cameras | ~30 Hz |
-| `/camera/depth/image_raw` | Image | mujoco_cameras | ~30 Hz |
+| `/head_camera/color` | Image | mujoco_cameras | ~6 Hz |
+| `/head_camera/depth` | Image | mujoco_cameras | ~6 Hz |
+| `/head_camera/camera_info` | CameraInfo | mujoco_cameras | ~6 Hz |
 | `/imu/data` | Imu | mujoco_system | 100 Hz |
 | `/contact/left_foot` | Contact force | mujoco_system | 100 Hz |
 | `/contact/right_foot` | Contact force | mujoco_system | 100 Hz |

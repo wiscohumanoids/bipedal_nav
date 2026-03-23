@@ -70,6 +70,9 @@ install(TARGETS
   RUNTIME DESTINATION bin
 )
 
+# Option: build with OSMesa for true headless rendering (Docker / CI)
+option(MUJOCO_HEADLESS_OSMESA "Use OSMesa for headless rendering (no display required)" OFF)
+
 # TODO: make it simple
 add_executable(mujoco_ros2_control
   src/mujoco_ros2_control_node.cpp
@@ -78,7 +81,17 @@ add_executable(mujoco_ros2_control
   src/mujoco_cameras.cpp
 )
 ament_target_dependencies(mujoco_ros2_control ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_ros2_control ${MUJOCO_LIB} glfw)
+
+if(MUJOCO_HEADLESS_OSMESA)
+  find_library(OSMESA_LIB OSMesa)
+  if(NOT OSMESA_LIB)
+    message(FATAL_ERROR "OSMesa not found. Install libosmesa6-dev or set -DMUJOCO_HEADLESS_OSMESA=OFF")
+  endif()
+  target_compile_definitions(mujoco_ros2_control PRIVATE MUJOCO_HEADLESS_OSMESA)
+  target_link_libraries(mujoco_ros2_control ${MUJOCO_LIB} glfw ${OSMESA_LIB})
+else()
+  target_link_libraries(mujoco_ros2_control ${MUJOCO_LIB} glfw)
+endif()
 target_include_directories(mujoco_ros2_control
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

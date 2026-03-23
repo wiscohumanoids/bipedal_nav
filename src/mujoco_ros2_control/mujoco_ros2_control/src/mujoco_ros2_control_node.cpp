@@ -25,6 +25,10 @@
 #include "mujoco_ros2_control/mujoco_rendering.hpp"
 #include "mujoco_ros2_control/mujoco_ros2_control.hpp"
 
+#ifdef MUJOCO_HEADLESS_OSMESA
+#include <GL/osmesa.h>
+#endif
+
 // MuJoCo data structures
 mjModel *mujoco_model = nullptr;
 mjData *mujoco_data = nullptr;
@@ -39,6 +43,13 @@ int main(int argc, const char **argv)
 
   RCLCPP_INFO_STREAM(node->get_logger(), "Initializing mujoco_ros2_control node...");
   auto model_path = node->get_parameter("mujoco_model_path").as_string();
+
+  // Check for headless mode (no GUI window — for Docker / CI / remote machines)
+  bool headless = false;
+  if (node->has_parameter("headless"))
+  {
+    headless = node->get_parameter("headless").as_bool();
+  }
 
   // load and compile model
   char error[1000] = "Could not load binary model";
@@ -69,20 +80,63 @@ int main(int argc, const char **argv)
     node->get_logger(), "Mujoco ros2 controller has been successfully initialized !");
 
   // initialize mujoco visualization environment for rendering and cameras
-  if (!glfwInit())
+  mujoco_ros2_control::MujocoRendering *rendering = nullptr;
+  if (!headless)
   {
-    mju_error("Could not initialize GLFW");
+    if (!glfwInit())
+    {
+      mju_error("Could not initialize GLFW");
+    }
+    rendering = mujoco_ros2_control::MujocoRendering::get_instance();
+    rendering->init(mujoco_model, mujoco_data);
+    RCLCPP_INFO_STREAM(
+      node->get_logger(), "Mujoco rendering has been successfully initialized !");
   }
-  auto rendering = mujoco_ros2_control::MujocoRendering::get_instance();
-  rendering->init(mujoco_model, mujoco_data);
-  RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco rendering has been successfully initialized !");
+  else
+  {
+    // Headless mode: create an OpenGL context without any display server.
+    // Uses OSMesa (software rendering) — works in Docker on any OS.
+#ifdef MUJOCO_HEADLESS_OSMESA
+    OSMesaContext ctx = OSMesaCreateContextExt(OSMESA_RGBA, 24, 8, 8, NULL);
+    if (!ctx)
+    {
+      mju_error("Could not create OSMesa context for headless rendering");
+    }
+    // OSMesa needs a buffer to bind to
+    static unsigned char osmesa_buffer[640 * 480 * 4];
+    if (!OSMesaMakeCurrent(ctx, osmesa_buffer, GL_UNSIGNED_BYTE, 640, 480))
+    {
+      mju_error("Could not make OSMesa context current");
+    }
+    RCLCPP_INFO_STREAM(
+      node->get_logger(), "Mujoco headless mode initialized with OSMesa (no GUI)");
+#else
+    // Fallback: try GLFW with hidden window (works if display server is available)
+    if (!glfwInit())
+    {
+      mju_error(
+        "Could not initialize GLFW in headless mode. "
+        "Rebuild with -DMUJOCO_HEADLESS_OSMESA=ON and install libosmesa6-dev for true headless support.");
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    GLFWwindow *hidden_window = glfwCreateWindow(640, 480, "headless", NULL, NULL);
+    if (!hidden_window)
+    {
+      mju_error("Could not create hidden GLFW window for headless mode");
+    }
+    glfwMakeContextCurrent(hidden_window);
+    RCLCPP_INFO_STREAM(
+      node->get_logger(), "Mujoco headless mode initialized with hidden GLFW window");
+#endif
+  }
 
   auto cameras = std::make_unique<mujoco_ros2_control::MujocoCameras>(node);
   cameras->init(mujoco_model);
 
   // run main loop, target real-time simulation and 60 fps rendering with cameras around 6 hz
   mjtNum last_cam_update = mujoco_data->time;
-  while (rclcpp::ok() && !rendering->is_close_flag_raised())
+  bool running = true;
+  while (rclcpp::ok() && running)
   {
     // advance interactive simulation for 1/60 sec
     //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
@@ -93,7 +147,15 @@ int main(int argc, const char **argv)
     {
       mujoco_control.update();
     }
-    rendering->update();
+
+    if (!headless)
+    {
+      rendering->update();
+      if (rendering->is_close_flag_raised())
+      {
+        running = false;
+      }
+    }
 
     // Updating cameras at ~6 Hz
     // TODO(eholum): Break control and rendering into separate processes
@@ -104,7 +166,10 @@ int main(int argc, const char **argv)
     }
   }
 
-  rendering->close();
+  if (!headless)
+  {
+    rendering->close();
+  }
   cameras->close();
 
   // free MuJoCo model and data

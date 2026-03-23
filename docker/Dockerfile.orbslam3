@@ -1,0 +1,115 @@
+# ORB-SLAM3 ROS2 Wrapper — CPU-only build
+# Based on suchetanrs/ORB-SLAM3-ROS2-Docker
+#
+# This image provides ORB-SLAM3 as a ROS2 node that connects to
+# the MuJoCo simulation via ROS2 topics (no code coupling).
+#
+# Build:  docker build -f docker/Dockerfile.orbslam3 -t orbslam3_ros2:latest .
+# Run:    docker/run_orbslam3.sh
+
+ARG ROS_DISTRO=humble
+
+FROM osrf/ros:${ROS_DISTRO}-desktop-full-jammy AS base
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ── System dependencies ─────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake build-essential git unzip pkg-config wget \
+        python3-dev python3-numpy python3-pip \
+        # OpenCV build deps
+        libavcodec-dev libavformat-dev libswscale-dev \
+        libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+        libgtk-3-dev \
+        # Pangolin deps
+        libgl1-mesa-dev libglew-dev libpython3-dev \
+        libeigen3-dev \
+        apt-transport-https ca-certificates software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── ROS2 packages needed by the wrapper ─────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-pcl-ros \
+        ros-${ROS_DISTRO}-nav2-common \
+        ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+        ros-${ROS_DISTRO}-cv-bridge \
+        ros-${ROS_DISTRO}-image-transport \
+        ros-${ROS_DISTRO}-image-common \
+        ros-${ROS_DISTRO}-vision-opencv \
+        ros-${ROS_DISTRO}-tf2-ros \
+        ros-${ROS_DISTRO}-tf2-eigen \
+        ros-${ROS_DISTRO}-tf2-geometry-msgs \
+        ros-${ROS_DISTRO}-pcl-conversions \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Build OpenCV 4.4.0 from source (ORB-SLAM3 requires this version) ───────
+RUN cd /tmp && git clone --depth 1 --branch 4.4.0 https://github.com/opencv/opencv.git && \
+    cd opencv && mkdir build && cd build && \
+    cmake -D CMAKE_BUILD_TYPE=Release \
+          -D BUILD_EXAMPLES=OFF -D BUILD_DOCS=OFF \
+          -D BUILD_PERF_TESTS=OFF -D BUILD_TESTS=OFF \
+          -D CMAKE_INSTALL_PREFIX=/usr/local .. && \
+    make -j$(nproc) && make install && \
+    cd / && rm -rf /tmp/opencv
+
+# ── Build Pangolin v0.9.1 (ORB-SLAM3 visualization backend) ────────────────
+RUN cd /tmp && git clone --depth 1 --branch v0.9.1 https://github.com/stevenlovegrove/Pangolin.git && \
+    cd Pangolin && mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 \
+          -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
+    make -j$(nproc) && make install && \
+    cd / && rm -rf /tmp/Pangolin && ldconfig
+
+# ── Clone and build ORB-SLAM3 (the actual SLAM library) ────────────────────
+RUN cd /home && mkdir -p orb && cd orb && \
+    git clone https://github.com/suchetanrs/ORB_SLAM3.git && \
+    cd ORB_SLAM3 && \
+    # Build thirdparty: DBoW2, g2o, Sophus
+    cd Thirdparty/DBoW2 && mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
+    make -j$(nproc) && \
+    cd ../../g2o && mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
+    make -j$(nproc) && \
+    cd ../../Sophus && mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
+    make -j$(nproc) && make install && \
+    cd ../../../ && \
+    # Extract vocabulary
+    cd Vocabulary && tar -xf ORBvoc.txt.tar.gz && cd .. && \
+    # Build ORB-SLAM3
+    mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
+    make -j$(nproc)
+
+# ── Clone and build the ROS2 wrapper ────────────────────────────────────────
+RUN mkdir -p /root/colcon_ws/src && \
+    cd /root/colcon_ws/src && \
+    git clone https://github.com/suchetanrs/ORB-SLAM3-ROS2-Docker.git orbslam3_repo && \
+    # Copy just the ROS2 packages we need (not the Dockerfile etc)
+    mv orbslam3_repo/orb_slam3_ros2_wrapper . && \
+    mv orbslam3_repo/slam_msgs . && \
+    mv orbslam3_repo/orb_slam3_map_generator . && \
+    rm -rf orbslam3_repo
+
+# Copy our custom camera config and ROS params for the G1 robot
+COPY docker/orbslam3_config/g1_rgbd.yaml \
+     /root/colcon_ws/src/orb_slam3_ros2_wrapper/params/orb_slam3_params/g1_rgbd.yaml
+COPY docker/orbslam3_config/g1-rgbd-ros-params.yaml \
+     /root/colcon_ws/src/orb_slam3_ros2_wrapper/params/ros_params/g1-rgbd-ros-params.yaml
+COPY docker/orbslam3_config/g1_rgbd.launch.py \
+     /root/colcon_ws/src/orb_slam3_ros2_wrapper/launch/g1_rgbd.launch.py
+
+# Build the ROS2 wrapper workspace
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
+    cd /root/colcon_ws && \
+    colcon build --symlink-install
+
+# ── Shell setup ─────────────────────────────────────────────────────────────
+RUN echo 'source /opt/ros/humble/setup.bash' >> /root/.bashrc && \
+    echo 'source /root/colcon_ws/install/setup.bash' >> /root/.bashrc && \
+    echo 'export LD_LIBRARY_PATH=/home/orb/ORB_SLAM3/lib:/home/orb/ORB_SLAM3/Thirdparty/DBoW2/lib:/home/orb/ORB_SLAM3/Thirdparty/g2o/lib:${LD_LIBRARY_PATH}' >> /root/.bashrc
+
+WORKDIR /root/colcon_ws
+
+CMD ["/bin/bash"]

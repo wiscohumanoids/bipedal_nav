@@ -1,25 +1,119 @@
 # Startup Guide — Humanoid Robotics Workspace
 
-This guide gets you from a fresh Ubuntu machine to running the Unitree G1 humanoid robot in MuJoCo simulation with ROS2. No prior ROS or robotics experience is assumed.
+This guide gets you from a fresh machine to running the Unitree G1 humanoid robot in MuJoCo simulation with ROS2. No prior ROS or robotics experience is assumed.
+
+There are **two ways** to set up the workspace:
+
+| Method | Best for | Pros | Cons |
+|--------|----------|------|------|
+| **Docker (recommended)** | Reproducibility, team onboarding | One command setup, identical environment for everyone | Requires Docker, GUI forwarding can be finicky |
+| **Native** | Daily development, fastest iteration | No overhead, direct GPU access | Must install ROS2 + MuJoCo manually |
 
 ---
 
 ## Table of Contents
 
-1. [Prerequisites](#1-prerequisites)
-2. [Install ROS2 Humble](#2-install-ros2-humble)
-3. [Install MuJoCo](#3-install-mujoco)
-4. [Clone and Build the Workspace](#4-clone-and-build-the-workspace)
-5. [Run the Simulation](#5-run-the-simulation)
-6. [Understand What's Running](#6-understand-whats-running)
-7. [Explore the Codebase](#7-explore-the-codebase)
-8. [Common Tasks](#8-common-tasks)
-9. [Troubleshooting](#9-troubleshooting)
-10. [Background Concepts](#10-background-concepts)
+1. [Quick Start with Docker (Recommended)](#1-quick-start-with-docker-recommended)
+2. [Native Setup](#2-native-setup)
+3. [Run the Simulation](#3-run-the-simulation)
+4. [ORB-SLAM3 Setup (SLAM Team)](#4-orb-slam3-setup-slam-team)
+5. [Understand What's Running](#5-understand-whats-running)
+6. [Explore the Codebase](#6-explore-the-codebase)
+7. [Common Tasks](#7-common-tasks)
+8. [Troubleshooting](#8-troubleshooting)
+9. [Background Concepts](#9-background-concepts)
 
 ---
 
-## 1. Prerequisites
+## 1. Quick Start with Docker (Recommended)
+
+### Prerequisites
+
+- **Docker:** Install [Docker Engine](https://docs.docker.com/engine/install/ubuntu/) (Linux) or [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS/Windows)
+- That's it — no display server, GPU, or native ROS2 install needed. The sim runs headless inside Docker.
+
+### Step 1: Clone the repo
+
+```bash
+git clone https://github.com/wiscohumanoids/bipedal_nav
+cd humanoid_ws
+```
+
+### Step 2: Build the Docker image
+
+```bash
+./docker/build.sh
+```
+
+This builds an image called `humanoid_ws:latest` containing:
+- ROS2 Humble
+- MuJoCo 3.2.7 (C library)
+- All ROS2 dependencies
+- Python venv with numpy, scipy, opencv
+- The entire workspace, pre-compiled
+
+Build takes ~5-10 minutes on the first run. The image is ~2 GB.
+
+### Step 3: Launch the simulation
+
+```bash
+# Headless mode (works on any OS — no display needed):
+./docker/run.sh ros2 launch unitree_ros2_control unitree_g1.launch.py headless:=true
+
+# With GUI (Linux/WSL2 only — requires X11/WSLg):
+./docker/run.sh ros2 launch unitree_ros2_control unitree_g1.launch.py
+```
+
+### Step 4: Verify in a second terminal
+
+The `run.sh` script auto-detects the running container and `exec`s into it:
+
+```bash
+# Check camera is publishing:
+./docker/run.sh ros2 topic hz /head_camera/color
+
+# See all active topics:
+./docker/run.sh ros2 topic list
+```
+
+### Step 5: Run SLAM node (in a second terminal)
+
+```bash
+./docker/run.sh ros2 run slam_pkg slam_node --ros-args \
+    --params-file install/slam_pkg/share/slam_pkg/config/slam_params.yaml
+```
+
+### Docker development workflow
+
+When you edit code in `src/`, you need to rebuild inside the container (or rebuild the image). Two options:
+
+**Option A — Rebuild inside running container (fast iteration):**
+```bash
+# Mount your source directory into the container for live editing:
+docker run --rm -it \
+    --network host \
+    -e DISPLAY=:0 \
+    -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+    -v $(pwd)/src:/home/ros2_ws/src:rw \
+    humanoid_ws:latest
+
+# Inside the container, rebuild changed packages:
+colcon build --packages-select slam_pkg
+source install/setup.bash
+```
+
+**Option B — Rebuild the image (clean slate):**
+```bash
+./docker/build.sh
+```
+
+---
+
+## 2. Native Setup
+
+Use this if you prefer to install everything directly on your machine.
+
+### Prerequisites
 
 - **OS:** Ubuntu 22.04 LTS (native or WSL2)
 - **RAM:** 8 GB minimum (16 GB recommended)
@@ -31,13 +125,7 @@ If you're on Windows, use WSL2:
 wsl --install -d Ubuntu-22.04
 ```
 
-For WSL2 users: MuJoCo rendering requires an X server. Install [VcXsrv](https://sourceforge.net/projects/vcxsrv/) or use WSLg (Windows 11 has this built-in).
-
----
-
-## 2. Install ROS2 Humble
-
-ROS2 (Robot Operating System 2) is the middleware that connects all our components. "Humble" is the LTS release for Ubuntu 22.04.
+### 2.1 Install ROS2 Humble
 
 ```bash
 # Set locale
@@ -66,76 +154,44 @@ sudo rosdep init 2>/dev/null || true
 rosdep update
 ```
 
-**Verify ROS2 works:**
+**Verify:**
 ```bash
 ros2 topic list
 # Should print: /parameter_events and /rosout
 ```
 
-### What is ROS2? (30-second version)
-ROS2 is a framework where independent programs ("nodes") communicate by publishing and subscribing to "topics." Think of topics as named channels:
-- Node A publishes joint positions to `/joint_states`
-- Node B subscribes to `/joint_states` and uses the data
-- Nodes can run in any language, on any machine, and are completely decoupled
-
----
-
-## 3. Install MuJoCo
-
-MuJoCo is the physics simulator. It simulates the robot's body, joints, gravity, and contact forces.
+### 2.2 Install MuJoCo
 
 ```bash
-# Download MuJoCo 3.2.7
-mkdir -p ~/.mujoco
-cd ~/.mujoco
+mkdir -p ~/.mujoco && cd ~/.mujoco
 wget https://github.com/google-deepmind/mujoco/releases/download/3.2.7/mujoco-3.2.7-linux-x86_64.tar.gz
 tar -xzf mujoco-3.2.7-linux-x86_64.tar.gz
 rm mujoco-3.2.7-linux-x86_64.tar.gz
 
-# Set environment variable
 echo 'export MUJOCO_DIR="$HOME/.mujoco/mujoco-3.2.7"' >> ~/.bashrc
 source ~/.bashrc
 
-# Install rendering dependencies
 sudo apt install -y libglfw3-dev libeigen3-dev
 ```
 
-**Verify MuJoCo works:**
-```bash
-$MUJOCO_DIR/bin/simulate $MUJOCO_DIR/model/humanoid/humanoid.xml
-# Should open a window with a humanoid model. Close it with Ctrl+C.
-```
-
-### What is MuJoCo? (30-second version)
-MuJoCo ("Multi-Joint dynamics with Contact") is a physics engine optimized for robotics. It takes a model of the robot (joints, links, mass, etc.) and simulates what happens when you apply forces/torques. Our robot model is defined in two formats:
-- **URDF** — standard ROS robot description (used by ROS2 tools)
-- **MJCF** (.xml) — MuJoCo's native format (used by the physics sim)
-
----
-
-## 4. Clone and Build the Workspace
+### 2.3 Clone, create venv, and build
 
 ```bash
-# Clone the repository
 cd ~
-git clone <YOUR_GITHUB_URL> bipedal_nav
-cd bipedal_nav
+git clone <YOUR_GITHUB_URL> humanoid_ws
+cd humanoid_ws
 
-# Install all ROS2 dependencies
-sudo apt install -y \
-    ros-humble-ros2-control \
-    ros-humble-ros2-controllers \
-    ros-humble-joint-state-broadcaster \
-    ros-humble-joint-trajectory-controller \
-    ros-humble-effort-controllers \
-    ros-humble-robot-state-publisher \
-    ros-humble-xacro \
-    ros-humble-tf2-ros \
-    ros-humble-rviz2 \
-    ros-humble-controller-manager
+# Create and activate a Python virtual environment
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install numpy scipy opencv-python-headless xacro
 
-# OR use the automated setup script:
-# ./scripts/setup_environment.sh
+# Install ROS2 dependencies
+sudo apt install -y ros-humble-ros2-control ros-humble-ros2-controllers \
+    ros-humble-joint-state-broadcaster ros-humble-joint-trajectory-controller \
+    ros-humble-effort-controllers ros-humble-robot-state-publisher \
+    ros-humble-xacro ros-humble-tf2-ros ros-humble-controller-manager \
+    python3-colcon-common-extensions
 
 # Conda users: install ROS2 build deps in your conda env BEFORE building
 # (empy must be 3.x — version 4.x is incompatible with ROS2 Humble)
@@ -145,101 +201,95 @@ sudo apt install -y \
 colcon build --symlink-install
 source install/setup.bash
 
-# Add workspace to .bashrc so it's sourced automatically
-echo "source ~/bipedal_nav/install/setup.bash" >> ~/.bashrc
+# Add to .bashrc for convenience
+echo 'source ~/humanoid_ws/.venv/bin/activate' >> ~/.bashrc
+echo 'source ~/humanoid_ws/install/setup.bash 2>/dev/null || true' >> ~/.bashrc
 ```
 
-**Verify the build:**
+### 2.4 Launch the simulation (native)
+
 ```bash
-./scripts/verify_setup.sh
-# Should show all checks passing
-```
+# Make sure everything is sourced
+source /opt/ros/humble/setup.bash
+source .venv/bin/activate
+source install/setup.bash
+export LD_LIBRARY_PATH=$MUJOCO_DIR/lib:$LD_LIBRARY_PATH
 
-### What is `colcon build`?
-`colcon` is the ROS2 build tool. It finds all packages in `src/`, resolves dependencies, and compiles them. After building:
-- Compiled binaries go to `build/`
-- Installed files go to `install/`
-- Build logs go to `log/`
-- `--symlink-install` makes Python files use symlinks so edits take effect without rebuilding
+# For WSL2, set DISPLAY
+export DISPLAY=:0
+
+# Launch
+ros2 launch unitree_ros2_control unitree_g1.launch.py
+```
 
 ---
 
-## 5. Run the Simulation
+## 3. Run the Simulation
+
+These commands work identically in Docker or native (just make sure you've sourced the workspace).
 
 ### Launch the G1 Robot in MuJoCo
 
 ```bash
-# Terminal 1: Launch the simulation
+# With GUI (native or Linux Docker with X11):
 ros2 launch unitree_ros2_control unitree_g1.launch.py
+
+# Headless (Docker on any OS):
+ros2 launch unitree_ros2_control unitree_g1.launch.py headless:=true
 ```
 
 You should see:
-1. A MuJoCo window opens showing the G1 humanoid robot
-2. The robot stands on a ground plane (it will likely collapse since no controller is sending commands yet)
+1. A MuJoCo window opens showing the G1 humanoid robot (GUI mode), or "headless mode initialized" log (headless mode)
+2. The robot stands on a ground plane (it will collapse if no controller is sending commands)
 3. Terminal output shows controllers being loaded
 
 ### Interact with the Simulation
 
-Open new terminals (each needs `source ~/bipedal_nav/install/setup.bash`):
+Open new terminals (each needs the workspace sourced):
 
 ```bash
-# Terminal 2: See all active topics
+# See all active topics
 ros2 topic list
 
-# Terminal 3: Watch joint states in real-time
+# Watch joint states in real-time
 ros2 topic echo /joint_states
 
-# Terminal 4: Check which controllers are loaded
+# Check which controllers are loaded
 ros2 control list_controllers
-
-# Terminal 5: Launch RViz to visualize the robot model
-rviz2 -d src/unitree_ros2_control/unitree_ros2_control/rviz/g1.rviz
 ```
+
+### Run the SLAM Node
+
+```bash
+ros2 run slam_pkg slam_node --ros-args \
+    --params-file install/slam_pkg/share/slam_pkg/config/slam_params.yaml
+```
+
+The SLAM node will:
+- Receive RGB and depth images from `/head_camera/color` and `/head_camera/depth`
+- Build an occupancy grid from depth data
+- Publish the map on `/slam/map` at 10 Hz
+- Broadcast the `map -> odom` TF transform
 
 ### Try the Standing Controller
 
-Once the base sim is working, test the locomotion stub:
-
 ```bash
-# Terminal 2: Launch the locomotion node in standing mode
 ros2 run locomotion_pkg locomotion_node --ros-args -p mode:=standing
 ```
 
-This sends a fixed standing pose to the robot's joints.
-
-### Try the Sinusoidal Gait
+### Try Motion Primitives
 
 ```bash
-ros2 run locomotion_pkg locomotion_node --ros-args -p mode:=sinusoidal
-```
-
-The robot will attempt to walk with sine-wave joint trajectories. It will probably fall — that's expected and normal! The locomotion team's job is to make this work properly.
-
-### Try the Motion Primitives
-
-Motion primitives generate simple, deterministic robot movements so that all sensors (camera, IMU, foot contacts) produce useful data — even before real locomotion policies exist.
-
-```bash
-# Terminal 2: Run a squat motion
 ros2 run motion_primitives_pkg motion_primitives_node --ros-args -p mode:=squat
-
-# Or try other modes:
-ros2 run motion_primitives_pkg motion_primitives_node --ros-args -p mode:=shift_weight
-ros2 run motion_primitives_pkg motion_primitives_node --ros-args -p mode:=step_forward
-ros2 run motion_primitives_pkg motion_primitives_node --ros-args -p mode:=arm_swing
-ros2 run motion_primitives_pkg motion_primitives_node --ros-args -p mode:=standing
+# Other modes: standing, shift_weight, step_forward, arm_swing
 ```
-
-Available modes: `standing`, `squat`, `shift_weight`, `step_forward`, `arm_swing`.
 
 ### Verify Sensors Are Working
 
-Once the simulation is running (with or without a motion primitive), check that all sensors are publishing:
-
 ```bash
 # Camera images (SLAM team)
-ros2 topic hz /camera/color/image_raw
-ros2 topic hz /camera/depth/image_raw
+ros2 topic hz /head_camera/color
+ros2 topic hz /head_camera/depth
 
 # IMU data (State Estimation team)
 ros2 topic echo /imu/data
@@ -247,71 +297,129 @@ ros2 topic echo /imu/data
 # Foot contact sensors (State Est + Locomotion teams)
 ros2 topic echo /contact/left_foot
 ros2 topic echo /contact/right_foot
+
+# SLAM occupancy grid
+ros2 topic hz /slam/map
 ```
-
-### Development Workflow with Motion Primitives
-
-This is the recommended workflow for all teams during early development:
-
-1. **Launch the simulation:** `ros2 launch unitree_ros2_control unitree_g1.launch.py`
-2. **Start a motion primitive** to get the robot moving (e.g., `mode:=squat`)
-3. **Subscribe to sensor topics** in your own nodes — you now have real, dynamic sensor data
-4. **Develop your algorithms** against this data
-
-This approach lets every team start development immediately without waiting for other teams to finish their work.
 
 ---
 
-## 6. Understand What's Running
+## 4. ORB-SLAM3 Setup (SLAM Team)
+
+ORB-SLAM3 runs in its own Docker container and connects to the MuJoCo simulation via ROS2 topics. No GPU required — it runs on CPU.
+
+### Build the ORB-SLAM3 image
+
+```bash
+docker build -f docker/Dockerfile.orbslam3 -t orbslam3_ros2:latest .
+```
+
+This takes 10-20 minutes on the first build (compiles OpenCV 4.4.0, Pangolin, and ORB-SLAM3 from source). The image is ~4-5 GB.
+
+### Run ORB-SLAM3
+
+You need two containers running simultaneously — they communicate via ROS2 topics over the host network (`--network host`).
+
+**Terminal 1 — MuJoCo simulation:**
+```bash
+./docker/run.sh ros2 launch unitree_ros2_control unitree_g1.launch.py headless:=true
+```
+
+**Terminal 2 — ORB-SLAM3:**
+```bash
+./docker/run_orbslam3.sh ros2 launch orb_slam3_ros2_wrapper g1_rgbd.launch.py
+```
+
+### Verify ORB-SLAM3 is working
+
+Open a third terminal in either container:
+```bash
+# Check ORB-SLAM3 is publishing pose
+ros2 topic echo /robot_pose_slam
+
+# Check point cloud is being built
+ros2 topic hz /map_points
+
+# Check TF tree includes map -> odom from ORB-SLAM3
+ros2 run tf2_ros tf2_echo map odom
+```
+
+### What ORB-SLAM3 publishes
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/robot_pose_slam` | `geometry_msgs/PoseStamped` | Robot pose in map frame |
+| `/map_points` | `sensor_msgs/PointCloud2` | Sparse 3D feature point cloud |
+| `/map_data` | custom | Full map data |
+| `/slam_info` | custom | Tracking status |
+| TF: `map -> odom` | tf2 | Localization transform |
+
+### What the SLAM team builds on top
+
+ORB-SLAM3 is the engine — it gives you pose + sparse points. The team builds:
+
+1. **Dense mapping** — combine ORB-SLAM3 pose with depth images to build occupancy grids or 3D voxel maps
+2. **Terrain export** — convert the map into MuJoCo MJCF format (heightfields or meshes) so the Unitree can walk on the reconstructed environment
+3. **Path planning** — use the map to plan collision-free paths (`path_planner_node.py`)
+4. **TF integration** — ensure `map -> odom -> base_link` chain works with the state estimation team
+
+### Camera configuration
+
+The ORB-SLAM3 camera config for the G1 is at `docker/orbslam3_config/g1_rgbd.yaml`. Key values:
+- `fx=240, fy=240, cx=320, cy=240` (matches MuJoCo head_camera with fovy=90, 640x480)
+- `Camera.fps: 6.0` (MuJoCo publishes at ~6 Hz)
+- `Camera.RGB: 1` (MuJoCo publishes rgb8 format)
+- `DepthMapFactor: 1.0` (MuJoCo depth is in meters)
+
+When switching to a real camera (e.g. RealSense D435), create a new YAML with the real camera's intrinsics.
+
+---
+
+## 5. Understand What's Running
 
 When you launch `unitree_g1.launch.py`, here's what happens:
 
 ```
 unitree_g1.launch.py
-│
-├── mujoco_ros2_control (C++ node)
-│   ├── Loads g1_23dof_rev_1_0.xml into MuJoCo physics engine
-│   ├── Loads g1_23dof_rev_1_0.urdf for joint/link info
-│   ├── Creates MujocoSystem hardware interface plugin
-│   ├── Opens rendering window (GLFW)
-│   ├── Runs physics at 1000 Hz (timestep = 0.001s)
-│   ├── Runs control loop at 100 Hz
-│   ├── Publishes /clock for simulation time
-│   ├── Publishes /camera/color/image_raw and /camera/depth/image_raw
-│   ├── Publishes /imu/data (orientation, gyro, accelerometer)
-│   └── Publishes /contact/left_foot and /contact/right_foot
-│
-├── robot_state_publisher (standard ROS2 node)
-│   ├── Reads URDF
-│   ├── Publishes /tf and /tf_static transforms
-│   └── Publishes /robot_description
-│
-├── joint_state_broadcaster (ros2_control controller)
-│   ├── Reads joint positions/velocities from hardware interface
-│   └── Publishes /joint_states at 100 Hz
-│
-└── g1_position_trajectory_controller (ros2_control controller)
-    ├── Subscribes to joint trajectory commands
-    └── Sends position commands to hardware interface → MuJoCo
+|
++-- mujoco_ros2_control (C++ node)
+|   +-- Loads g1_23dof_rev_1_0.xml into MuJoCo physics engine
+|   +-- Opens rendering window (GLFW) or runs headless (OSMesa)
+|   +-- Runs physics at 1000 Hz
+|   +-- Publishes /clock for simulation time
+|   +-- Publishes /head_camera/color and /head_camera/depth (~6 Hz)
+|   +-- Publishes /head_camera/camera_info
+|   +-- Publishes /imu/data (100 Hz)
+|   +-- Publishes /contact/left_foot and /contact/right_foot
+|
++-- robot_state_publisher
+|   +-- Publishes /tf, /tf_static, /robot_description
+|
++-- joint_state_broadcaster
+|   +-- Publishes /joint_states at 100 Hz
+|
++-- g1_position_trajectory_controller
+    +-- Accepts joint trajectory commands
+    +-- Sends position commands to MuJoCo
 ```
 
-### The Control Loop (How Commands Reach the Robot)
+### The Control Loop
 
 ```
 Your code publishes JointTrajectory
-    → g1_position_trajectory_controller receives it
-    → controller_manager calls write()
-    → MujocoSystem::write() sets mj_data->qpos[] in MuJoCo
-    → MuJoCo physics engine steps forward
-    → MujocoSystem::read() reads new joint positions
-    → joint_state_broadcaster publishes /joint_states
-    → Your code reads the new state
-    → (loop)
+    -> g1_position_trajectory_controller receives it
+    -> controller_manager calls write()
+    -> MujocoSystem::write() sets mj_data->qpos[] in MuJoCo
+    -> MuJoCo physics engine steps forward
+    -> MujocoSystem::read() reads new joint positions
+    -> joint_state_broadcaster publishes /joint_states
+    -> Your code reads the new state
+    -> (loop)
 ```
 
 ---
 
-## 7. Explore the Codebase
+## 6. Explore the Codebase
 
 ### Where Things Are
 
@@ -320,7 +428,7 @@ Your code publishes JointTrajectory
 | Robot 3D model (physics) | `src/g1_description/g1_23dof_rev_1_0.xml` | MJCF/XML |
 | Robot description (ROS) | `src/g1_description/g1_23dof_rev_1_0.urdf` | URDF/XML |
 | Robot meshes | `src/g1_description/meshes/` | STL |
-| MuJoCo↔ROS bridge | `src/mujoco_ros2_control/mujoco_ros2_control/src/` | C++ |
+| MuJoCo-ROS bridge | `src/mujoco_ros2_control/mujoco_ros2_control/src/` | C++ |
 | Simulation launch | `src/unitree_ros2_control/.../launch/unitree_g1.launch.py` | Python |
 | Controller config | `src/unitree_ros2_control/.../config/g1_position_controllers.yaml` | YAML |
 | Team interfaces | `src/interfaces/humanoid_interfaces/msg/` | ROS2 IDL |
@@ -328,61 +436,14 @@ Your code publishes JointTrajectory
 | State estimation code | `src/state_estimation/state_estimation_pkg/` | Python |
 | Locomotion code | `src/locomotion/locomotion_pkg/locomotion_pkg/` | Python |
 | Integration launch | `src/integration/launch/full_stack.launch.py` | Python |
-| Motion primitives | `src/motion_primitives_pkg/` | Python |
-
-### The G1 Robot
-
-The Unitree G1 is a humanoid robot with 23 controllable joints in our configuration:
-- **12 leg joints** (6 per leg): hip pitch/roll/yaw, knee, ankle pitch/roll
-- **1 waist joint**: waist yaw
-- **10 arm joints** (5 per arm): shoulder pitch/roll/yaw, elbow, wrist roll
-
-The MJCF file (`g1_23dof_rev_1_0.xml`) defines the physics:
-- Mass and inertia of each body part
-- Joint limits and damping
-- Contact properties (friction)
-- Actuator force limits
-
-### Understanding the URDF
-
-The URDF (Unified Robot Description Format) is an XML file that describes:
-```xml
-<robot>
-  <link name="pelvis">          <!-- A rigid body -->
-    <visual>...</visual>        <!-- How it looks -->
-    <collision>...</collision>  <!-- Collision shape -->
-    <inertial>...</inertial>    <!-- Mass properties -->
-  </link>
-  <joint name="left_hip_pitch_joint" type="revolute">
-    <parent link="pelvis"/>     <!-- Connected to... -->
-    <child link="left_hip_pitch_link"/>
-    <limit lower="-2.53" upper="2.88" effort="88"/>
-  </joint>
-</robot>
-```
-
-### Understanding the MJCF
-
-MuJoCo's model format defines the physics simulation:
-```xml
-<mujoco>
-  <option timestep="0.001" gravity="0 0 -9.81"/>
-  <worldbody>
-    <body name="pelvis" pos="0 0 0.793">
-      <joint name="floating_base_joint" type="free"/>  <!-- 6-DOF floating base -->
-      <geom type="mesh" mesh="pelvis"/>
-      <body name="left_hip_pitch_link">
-        <joint name="left_hip_pitch_joint" axis="0 1 0"
-               range="-2.53 2.88" actuatorfrcrange="-88 88"/>
-      </body>
-    </body>
-  </worldbody>
-</mujoco>
-```
+| Motion primitives | `src/integration/motion_primitives_pkg/` | Python |
+| **Docker (main)** | `Dockerfile`, `docker/build.sh`, `docker/run.sh` | Shell/Docker |
+| **Docker (ORB-SLAM3)** | `docker/Dockerfile.orbslam3`, `docker/run_orbslam3.sh` | Shell/Docker |
+| **ORB-SLAM3 config** | `docker/orbslam3_config/` | YAML/Python |
 
 ---
 
-## 8. Common Tasks
+## 7. Common Tasks
 
 ### Build Only Your Team's Package
 
@@ -398,15 +459,13 @@ MuJoCo's model format defines the physics simulation:
 ### View Camera Images
 
 ```bash
-# In a separate terminal
 ros2 run rqt_image_view rqt_image_view
-# Select /camera/color/image_raw from the dropdown
+# Select /head_camera/color from the dropdown
 ```
 
 ### Send a Test Joint Command
 
 ```bash
-# Send the robot to a pose via command line
 ros2 topic pub --once /g1_position_trajectory_controller/joint_trajectory \
   trajectory_msgs/msg/JointTrajectory \
   "{joint_names: ['left_hip_pitch_joint', 'right_hip_pitch_joint', 'left_knee_joint', 'right_knee_joint'], \
@@ -416,95 +475,109 @@ ros2 topic pub --once /g1_position_trajectory_controller/joint_trajectory \
 ### Record and Replay Data
 
 ```bash
-# Record all topics
 ros2 bag record -a -o my_recording
-
-# Replay
 ros2 bag play my_recording
-```
-
-### Check Simulation Time
-
-```bash
-ros2 topic echo /clock
 ```
 
 ---
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
-### "Package not found" errors
+### Docker: MuJoCo window doesn't appear
+
+Use headless mode — it works on any OS without display configuration:
+```bash
+./docker/run.sh ros2 launch unitree_ros2_control unitree_g1.launch.py headless:=true
+```
+
+If you want the GUI (Linux/WSL2 only):
+```bash
+# Linux — allow Docker to use your X server:
+xhost +local:docker
+./docker/run.sh ros2 launch unitree_ros2_control unitree_g1.launch.py
+
+# WSL2 — make sure DISPLAY is set:
+export DISPLAY=:0
+./docker/run.sh ros2 launch unitree_ros2_control unitree_g1.launch.py
+```
+
+### Docker: "container name already in use"
+
+The `run.sh` script now auto-detects running containers and `exec`s into them. If you hit this error with an old version of the script, either:
+```bash
+docker rm -f humanoid_ws_dev   # remove the stale container
+# or use docker exec directly:
+docker exec -it humanoid_ws_dev bash
+```
+
+### Docker: "permission denied" on docker commands
 
 ```bash
-# Make sure you've sourced the workspace
-source ~/bipedal_nav/install/setup.bash
+sudo usermod -aG docker $USER
+# Log out and back in
+```
 
-# Rebuild
+### Native: "Package not found" errors
+
+```bash
+source ~/humanoid_ws/install/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 ```
 
-### MuJoCo window doesn't open
+### Native: MuJoCo window doesn't open
 
 ```bash
-# Check if DISPLAY is set (needed for rendering)
-echo $DISPLAY
+echo $DISPLAY        # Should be :0 for WSL2
+echo $MUJOCO_DIR     # Should point to MuJoCo install
 
-# For WSL2, set it:
+# For WSL2:
 export DISPLAY=:0
-
-# Or if using WSLg:
-export DISPLAY=:0
-export WAYLAND_DISPLAY=wayland-0
 ```
 
-### "Could not find MUJOCO" during build
+### Native: "Could not find MUJOCO" during build
 
 ```bash
-# Make sure MUJOCO_DIR is set
-echo $MUJOCO_DIR
-# Should print something like /home/yourname/.mujoco/mujoco-3.2.7
-
-# If empty:
 export MUJOCO_DIR="$HOME/.mujoco/mujoco-3.2.7"
+```
+
+### Native: `libmujoco.so` not found at runtime
+
+```bash
+export LD_LIBRARY_PATH=$MUJOCO_DIR/lib:$LD_LIBRARY_PATH
 ```
 
 ### Controllers fail to load
 
 The controllers load 3 seconds after the simulation starts. If you see errors:
 ```bash
-# Check if the controller manager is running
 ros2 control list_controllers
 
-# Manually load controllers
+# Manually load if needed:
 ros2 control load_controller --set-state active joint_state_broadcaster
 ros2 control load_controller --set-state active g1_position_trajectory_controller
 ```
 
 ### Robot collapses immediately
 
-This is expected if no controller is sending commands. The physics simulation applies gravity and the robot falls. Launch a locomotion controller to hold the robot up:
+Expected if no controller is sending commands. Run a locomotion controller:
 ```bash
 ros2 run locomotion_pkg locomotion_node --ros-args -p mode:=standing
 ```
 
-### Build errors in mujoco_ros2_control
+### Headless visualization with Foxglove (no GUI available)
 
+If you can't get the MuJoCo GUI to display (e.g. remote server, no X11), you can use
+[Foxglove](https://foxglove.dev/) to view camera feeds and topics in a web browser:
 ```bash
-# Make sure all dependencies are installed
-sudo apt install -y libglfw3-dev libeigen3-dev
-sudo apt install -y ros-humble-ros2-control ros-humble-ros2-controllers \
-    ros-humble-controller-manager ros-humble-joint-state-broadcaster \
-    ros-humble-joint-trajectory-controller ros-humble-effort-controllers
-
-# Clean and rebuild
-rm -rf build/ install/ log/
-colcon build --symlink-install
+sudo apt install -y ros-humble-foxglove-bridge
+ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+# Open https://app.foxglove.dev and connect to ws://localhost:8765
 ```
 
 ---
 
-## 10. Background Concepts
+## 9. Background Concepts
 
 ### For Everyone
 
@@ -528,22 +601,17 @@ colcon build --symlink-install
 - **SLAM** = Simultaneous Localization and Mapping: building a map while figuring out where you are in it
 - **Visual Odometry**: Estimating camera motion from image sequences
 - **Occupancy Grid**: 2D grid where each cell = "occupied", "free", or "unknown"
-- **A\***: Classic shortest-path algorithm on a grid
+- Camera topics are `/head_camera/color`, `/head_camera/depth`, `/head_camera/camera_info`
 
 ### For State Estimation Team
-- **State Estimation**: Computing the robot's full state (pose, velocity) from noisy sensor data
 - **EKF** (Extended Kalman Filter): The workhorse algorithm — predicts state forward, then corrects with measurements
 - **IMU**: Inertial Measurement Unit — measures angular velocity (gyro) and linear acceleration (accelerometer)
 - **Forward Kinematics**: Joint angles → where each link is in 3D space
 
 ### For Locomotion Team
 - **RL** (Reinforcement Learning): Train a policy by trial-and-error in simulation
-- **PPO**: Proximal Policy Optimization — one of the most popular RL algorithm for locomotion
-- **Observation space**: What the policy sees (joint angles, velocities, base orientation, etc.)
-- **Action space**: What the policy outputs (target joint positions)
-- **Reward function**: Scalar signal that tells the policy how well it's doing
+- **PPO**: Proximal Policy Optimization — popular RL algorithm for locomotion
 - **Gait cycle**: The repeating pattern of leg movements (stance → swing → stance)
-- **CPG**: Central Pattern Generator — produces rhythmic patterns for walking without RL
 
 ---
 

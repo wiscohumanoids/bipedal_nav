@@ -1,0 +1,69 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters — Unitree G1 head_camera (MuJoCo simulation)
+# 640x480, fovy=90 degrees → focal length = 240.0
+#--------------------------------------------------------------------------------------------
+Camera.type: "PinHole"
+
+# Camera calibration (no distortion in simulation)
+Camera.fx: 240.0
+Camera.fy: 240.0
+Camera.cx: 320.0
+Camera.cy: 240.0
+
+# Distortion parameters (zero — simulated pinhole camera)
+Camera.k1: 0.0
+Camera.k2: 0.0
+Camera.p1: 0.0
+Camera.p2: 0.0
+Camera.k3: 0.0
+
+Camera.width: 640
+Camera.height: 480
+
+# Camera frames per second (MuJoCo publishes at ~6 Hz)
+Camera.fps: 6.0
+
+# IR projector baseline times fx (not applicable for sim, set reasonable default)
+Camera.bf: 40.0
+
+# Color order (1 = RGB, MuJoCo publishes rgb8)
+Camera.RGB: 1
+
+# Close/Far threshold. Baseline times.
+ThDepth: 40.0
+
+# Depth map values factor (MuJoCo depth is in meters as float32)
+DepthMapFactor: 1.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+
+# ORB Extractor: Number of features per image
+ORBextractor.nFeatures: 1000
+
+# ORB Extractor: Scale factor between levels in the scale pyramid
+ORBextractor.scaleFactor: 1.2
+
+# ORB Extractor: Number of levels in the scale pyramid
+ORBextractor.nLevels: 8
+
+# ORB Extractor: Fast threshold
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500

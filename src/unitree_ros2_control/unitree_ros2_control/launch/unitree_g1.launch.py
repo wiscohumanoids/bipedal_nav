@@ -3,8 +3,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, RegisterEventHandler, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessExit
+from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
 
@@ -14,6 +15,11 @@ import xacro
 def generate_launch_description():
     g1_description_path = get_package_share_directory('g1_description')
     unitree_ros2_control_path = get_package_share_directory('unitree_ros2_control')
+
+    # Launch argument for headless mode (no GUI — for Docker / CI / remote machines)
+    headless_arg = DeclareLaunchArgument(
+        'headless', default_value='false',
+        description='Run without GUI window (for Docker / headless environments)')
 
     # Parse URDF via xacro
     urdf_file = os.path.join(g1_description_path, 'g1_23dof_rev_1_0.urdf')
@@ -35,6 +41,7 @@ def generate_launch_description():
             robot_description,
             controller_config_file,
             {'mujoco_model_path': mujoco_model_path},
+            {'headless': LaunchConfiguration('headless')},
         ],
     )
 
@@ -64,6 +71,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        headless_arg,
         node_mujoco_ros2_control,
         node_robot_state_publisher,
         delayed_broadcaster,

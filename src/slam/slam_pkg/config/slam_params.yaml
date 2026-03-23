@@ -1,9 +1,9 @@
 slam_node:
   ros__parameters:
     # Camera topics
-    image_topic: "/camera/color/image_raw"
-    depth_topic: "/camera/depth/image_raw"
-    camera_info_topic: "/camera/camera_info"
+    image_topic: "/head_camera/color"
+    depth_topic: "/head_camera/depth"
+    camera_info_topic: "/head_camera/camera_info"
 
     # SLAM parameters
     update_rate: 10.0  # Hz

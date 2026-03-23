@@ -1,0 +1,31 @@
+# ROS2 parameters for ORB-SLAM3 RGBD mode with the Unitree G1 robot
+# Topic names match the MuJoCo simulation camera output
+
+ORB_SLAM3_RGBD_ROS2:
+  ros__parameters:
+    # Frame configuration
+    robot_base_frame: pelvis
+    global_frame: map
+    odom_frame: odom
+
+    # Topic names — must match MuJoCo camera publisher
+    rgb_image_topic_name: /head_camera/color
+    depth_image_topic_name: /head_camera/depth
+
+    # Transform from base_link (pelvis) to camera
+    # The head_camera is at pos="0 0 0.12" relative to head_link,
+    # which is roughly 0.55m above pelvis
+    robot_x: 0.0
+    robot_y: 0.0
+    robot_z: 0.55
+    robot_qx: 0.0
+    robot_qy: 0.0
+    robot_qz: 0.0
+    robot_qw: 1.0
+
+    # ORB-SLAM3 settings
+    visualization: false
+    odometry_mode: false
+    publish_tf: true
+    map_data_publish_frequency: 1000
+    do_loop_closing: true

@@ -1,0 +1,17 @@
+build/
+install/
+log/
+.git/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+wandb/
+runs/
+checkpoints/
+*.onnx
+*.pt
+.DS_Store
+Thumbs.db
+**/.vscode/
+**/.idea/
