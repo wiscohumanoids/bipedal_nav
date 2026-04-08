@@ -34,8 +34,9 @@ else
         # Interactive shell — .bashrc handles sourcing
         docker run --rm -it \
             --name "${CONTAINER_NAME}" \
-            --network host \
+            --network ros2_net \
             --privileged \
+	    -p 8765:8765 \
             -e DISPLAY="${DISPLAY:-:0}" \
             -e QT_X11_NO_MITSHM=1 \
             -e WAYLAND_DISPLAY="${WAYLAND_DISPLAY}" \
@@ -47,8 +48,9 @@ else
         # Command mode — source workspace before running
         docker run --rm -it \
             --name "${CONTAINER_NAME}" \
-            --network host \
+            --network ros2_net \
             --privileged \
+	    -p 8765:8765 \
             -e DISPLAY="${DISPLAY:-:0}" \
             -e QT_X11_NO_MITSHM=1 \
             -e WAYLAND_DISPLAY="${WAYLAND_DISPLAY}" \

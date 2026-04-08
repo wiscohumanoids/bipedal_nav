@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-${ROS_DISTRO}-xacro \
         ros-${ROS_DISTRO}-tf2-ros \
         ros-${ROS_DISTRO}-controller-manager \
+	ros-${ROS_DISTRO}-foxglove-bridge \
         python3-colcon-common-extensions \
         python3-rosdep \
     && rm -rf /var/lib/apt/lists/*

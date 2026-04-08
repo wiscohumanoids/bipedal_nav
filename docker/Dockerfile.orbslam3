@@ -9,7 +9,7 @@
 
 ARG ROS_DISTRO=humble
 
-FROM osrf/ros:${ROS_DISTRO}-desktop-full-jammy AS base
+FROM ros:humble-ros-base AS base
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -49,7 +49,7 @@ RUN cd /tmp && git clone --depth 1 --branch 4.4.0 https://github.com/opencv/open
           -D BUILD_EXAMPLES=OFF -D BUILD_DOCS=OFF \
           -D BUILD_PERF_TESTS=OFF -D BUILD_TESTS=OFF \
           -D CMAKE_INSTALL_PREFIX=/usr/local .. && \
-    make -j$(nproc) && make install && \
+    make -j1 && make install && \
     cd / && rm -rf /tmp/opencv
 
 # ── Build Pangolin v0.9.1 (ORB-SLAM3 visualization backend) ────────────────
@@ -57,7 +57,7 @@ RUN cd /tmp && git clone --depth 1 --branch v0.9.1 https://github.com/stevenlove
     cd Pangolin && mkdir build && cd build && \
     cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 \
           -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
-    make -j$(nproc) && make install && \
+    make -j1 && make install && \
     cd / && rm -rf /tmp/Pangolin && ldconfig
 
 # ── Clone and build ORB-SLAM3 (the actual SLAM library) ────────────────────
@@ -67,20 +67,20 @@ RUN cd /home && mkdir -p orb && cd orb && \
     # Build thirdparty: DBoW2, g2o, Sophus
     cd Thirdparty/DBoW2 && mkdir -p build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
-    make -j$(nproc) && \
+    make -j1 && \
     cd ../../g2o && mkdir -p build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
-    make -j$(nproc) && \
+    make -j1 && \
     cd ../../Sophus && mkdir -p build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
-    make -j$(nproc) && make install && \
+    make -j1 && make install && \
     cd ../../../ && \
     # Extract vocabulary
     cd Vocabulary && tar -xf ORBvoc.txt.tar.gz && cd .. && \
     # Build ORB-SLAM3
     mkdir -p build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 && \
-    make -j$(nproc)
+    make -j1
 
 # ── Clone and build the ROS2 wrapper ────────────────────────────────────────
 RUN mkdir -p /root/colcon_ws/src && \
