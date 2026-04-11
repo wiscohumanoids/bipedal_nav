@@ -22,6 +22,7 @@ There are **two ways** to set up the workspace:
 7. [Common Tasks](#7-common-tasks)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Background Concepts](#9-background-concepts)
+10. [Foxglove Setup](#10-foxglove-setup)
 
 ---
 
@@ -612,6 +613,46 @@ ros2 launch foxglove_bridge foxglove_bridge_launch.xml
 - **RL** (Reinforcement Learning): Train a policy by trial-and-error in simulation
 - **PPO**: Proximal Policy Optimization — popular RL algorithm for locomotion
 - **Gait cycle**: The repeating pattern of leg movements (stance → swing → stance)
+
+---
+
+## 10. Foxglove Setup
+
+[Foxglove Studio](https://foxglove.dev/) gives you a browser-based or desktop GUI to visualize robot topics — useful when you don't have a display (Docker, remote server, no X11).
+
+### Prerequisites
+
+**Option A — Web app (no install):** Open [app.foxglove.dev](https://app.foxglove.dev) in your browser.
+
+**Option B — Desktop app:** Download from [foxglove.dev/download](https://foxglove.dev/download) (available for Linux, macOS, and Windows).
+
+### Step 1: Launch the Foxglove bridge (new terminal)
+
+```bash
+./docker/run.sh bash
+```
+
+Inside the container:
+
+```bash
+ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765
+```
+
+Wait until you see `Server listening on port 8765`.
+
+### Step 2: Connect Foxglove
+
+1. Open Foxglove Studio (web or desktop)
+2. Click the Foxglove logo (top left) → **Open connection**
+3. Select **Foxglove WebSocket**
+4. Enter `ws://localhost:8765`
+5. Click **Connect**
+
+### Step 3: Visualize
+
+- Add a **3D panel** to see the robot model and transforms
+- Add an **Image panel** → select `/head_camera/color` for the camera feed
+- Add a **Topic graph** to see all active topics
 
 ---
 
